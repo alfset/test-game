@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flappy Bird Game</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      text-align: center;
+    }
+    canvas {
+      background-color: #70c5ce;
+      border: 2px solid #000;
+      display: block;
+      margin: 0 auto;
+    }
+    #gameOverMessage {
+      display: none;
+      font-size: 30px;
+      color: red;
+      margin-top: 20px;
+    }
+    #gameContainer {
+      display: none;
+    }
+    #walletInfo {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Flappy Bird Game</h1>
+  
+  <div id="walletInfo">
+    <h3>Wallet Info:</h3>
+    <p><strong>Address:</strong> <span id="walletAddress"></span></p>
+    <p><strong>Private Key (For Development Purposes):</strong> <span id="walletPrivateKey"></span></p>
+  </div>
+  
+  <button id="generateWalletButton" onclick="generateWallet()">Generate Wallet</button>
+  <button id="init" onclick="initializeGame()">init Game</button>
+
+
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="1000" height="500"></canvas>
+    <div id="score">Score: 0</div>  
+    <div id="gameOverMessage">Game Over!</div>
+  </div>
+
+  <div id="moveButtons">
+    <button onclick="movePlayer('up')">Move Up</button>
+    <button onclick="movePlayer('down')">Move Down</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const gameOverMessage = document.getElementById('gameOverMessage');
+    const scoreElement = document.getElementById('score');
+    const gameContainer = document.getElementById('gameContainer');
+    
+    let birdY = canvas.height / 2;
+    let birdSpeed = 0;
+    let score = 0;
+    let isGameOver = false;
+    let walletGenerated = false;
+    
+    const obstacles = [];
+    const obstacleWidth = 50;
+    const obstacleGap = 200; // Increase this to make sure the gap is wide enough
+    
+    // Initialize the game when the wallet is generated
+    async function generateWallet() {
+      const response = await fetch('/generate-wallet', { method: 'POST' });
+      const data = await response.json();
+
+      document.getElementById('walletAddress').innerText = data.address;
+      document.getElementById('walletPrivateKey').innerText = data.privateKey;
+      
+      walletGenerated = true;
+      gameContainer.style.display = 'block'; // Show the game canvas and controls
+      updateGame(); // Start the game
+
+    }
+
+    async function initializeGame() {
+      birdY = canvas.height / 2;
+      const response = await fetch('/initialize', { method: 'POST' });
+      const data = await response.json();
+      updateGame(); // Start the game
+    }
+
+    // Control movement of the bird
+    async function movePlayer(direction) {
+      if (direction === 'up' && !isGameOver) {
+        birdSpeed = -10; // Move up
+      } else if (direction === 'down' && !isGameOver) {
+        birdSpeed = 10; // Move down
+      }
+      await updatePositionAndScore();
+    }
+
+    async function updatePositionAndScore() {
+      const responsePosition = await fetch('/get-player-position?address=' + document.getElementById('walletAddress').innerText);
+      const dataPosition = await responsePosition.json();
+      birdY = dataPosition.position; // Update bird's position from the server (no modulus needed anymore)
+
+      const responseScore = await fetch('/get-player-score?address=' + document.getElementById('walletAddress').innerText);
+      const dataScore = await responseScore.json();
+      score = dataScore.score;
+      scoreElement.innerText = 'Score: ' + score;
+    }
+
+    function drawBird() {
+      ctx.beginPath();
+      ctx.arc(50, birdY, 20, 0, Math.PI * 2); // Keep the bird's Y position fixed based on input
+      ctx.fillStyle = 'yellow';
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function drawObstacles() {
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        ctx.fillStyle = 'green';
+        ctx.fillRect(obs.x, 0, obstacleWidth, obs.top);
+        ctx.fillRect(obs.x, canvas.height - obs.bottom, obstacleWidth, obs.bottom);
+      }
+    }
+
+    function moveObstacles() {
+      for (let i = 0; i < obstacles.length; i++) {
+        obstacles[i].x -= 2;
+      }
+    }
+
+    function generateObstacles() {
+      if (Math.random() < 0.02) {
+        const topHeight = Math.floor(Math.random() * 10); 
+        const bottomHeight = canvas.height - topHeight - obstacleGap;
+        obstacles.push({
+          x: canvas.width,
+          top: topHeight,
+          bottom: bottomHeight
+        });
+      }
+    }
+
+    function detectCollisions() {
+      for (let i = 0; i < obstacles.length; i++) {
+        const obs = obstacles[i];
+        if (50 + 20 > obs.x && 50 - 20 < obs.x + obstacleWidth) {
+          if (birdY - 20 < obs.top || birdY + 20 > canvas.height - obs.bottom) {
+            gameOver();
+            return;
+          }
+        }
+      }
+    }
+
+    function gameOver() {
+      isGameOver = true;
+      gameOverMessage.style.display = 'block';
+      fetch('/game-over', { method: 'POST' });
+    }
+
+    // Keyboard controls for movement
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') {
+        movePlayer('up');
+      } else if (e.key === 'ArrowDown') {
+        movePlayer('down');
+      }
+    });
+
+    function updateGame() {
+      if (isGameOver) return;
+
+      // Apply birdSpeed directly based on player input
+      birdY += birdSpeed;
+
+      // Keep bird within canvas bounds
+      if (birdY < 0) birdY = 0; // prevent bird from going above the top
+      if (birdY > canvas.height) birdY = canvas.height; // prevent bird from falling out of bounds
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the canvas
+      drawBird();
+      moveObstacles();
+      drawObstacles();
+      generateObstacles();
+      detectCollisions();
+      requestAnimationFrame(updateGame); // Keep updating the game
+    }
+  </script>
+</body>
+</html>
